@@ -79,6 +79,7 @@ def load_esb_data(user, password, mpnr, start_date):
   print("[+] CSV file received !!!")
   data_decoded = data.content.decode('utf-8').splitlines()
   print("[+] data decoded from Binary format")
+  print("[+] Adding to InfluxDB (this will take a while)...")
   json_data = parse_csv(data_decoded)
   return json_data
 
@@ -122,8 +123,8 @@ def update_influx(mpnr, the_date, value):
   )
   write_api.write(bucket=influx_bucket, org=influx_org, record=point)
 
-with open("config.yaml") as config_file
-  config = yaml.load(config_file)
+with open("config.yml") as config_file:
+  config = yaml.load(config_file, Loader=yaml.FullLoader)
 
 meter_mprn = config["esb"]["mprn"]
 esb_user_name = config["esb"]["user_name"]

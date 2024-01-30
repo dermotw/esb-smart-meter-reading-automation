@@ -1,0 +1,10 @@
+esb:
+  mprn: "123456789"
+  user_name: "you@example.com"
+  password: "abc123"
+
+influx:
+  token: "your_token_goes_here"
+  url: "https://influx.example.com"
+  org: "your_org"
+  bucket: "your_bucket"
