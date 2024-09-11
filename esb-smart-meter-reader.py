@@ -1,127 +1,17 @@
-#!/usr/bin/env python3
-
-# https://www.boards.ie/discussion/2058292506/esb-smart-meter-data-script
-# https://gist.github.com/schlan/f72d823dd5c1c1d19dfd784eb392dded
-
-# Modified by badger707
-# it works as of 21-JUL-2023
-#
-# Further modified by dermo
-# still works as of 30/01/2024 but give me time...
-
-import urllib3
-urllib3.disable_warnings()
-
+# #!/usr/bin/env python3
 import requests
-from bs4 import BeautifulSoup
-import re
+from bs4 import BeautifulSoup   # pip install beautifulsoup4
+import re as re
 import json
 import csv
-from datetime import datetime, timedelta, timezone
-
-import influxdb_client, os, time
-from influxdb_client import InfluxDBClient, Point, WritePrecision
-from influxdb_client.client.write_api import SYNCHRONOUS
-
 import yaml
-from yaml import load
+import sys
 
-def load_esb_data(user, password, mpnr, start_date):
-  print("[+] open session ...")
-  s = requests.Session()
-  s.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36',
-  })    
-  print("[+] calling login page. ..")
-  login_page = s.get('https://myaccount.esbnetworks.ie/', allow_redirects=True)
-  result = re.findall(r"(?<=var SETTINGS = )\S*;", str(login_page.content))
-  settings = json.loads(result[0][:-1])
-  print("[+] sending credentials ...")
-  s.post(
-    'https://login.esbnetworks.ie/esbntwkscustportalprdb2c01.onmicrosoft.com/B2C_1A_signup_signin/SelfAsserted?tx=' + settings['transId'] + '&p=B2C_1A_signup_signin', 
-    data={
-      'signInName': user, 
-      'password': password, 
-      'request_type': 'RESPONSE'
-    },
-    headers={
-      'x-csrf-token': settings['csrf'],
-    },
-    allow_redirects=False)
-  print("[+] passing AUTH ...")
-  confirm_login = s.get(
-    'https://login.esbnetworks.ie/esbntwkscustportalprdb2c01.onmicrosoft.com/B2C_1A_signup_signin/api/CombinedSigninAndSignup/confirmed',
-    params={
-      'rememberMe': False,
-      'csrf_token': settings['csrf'],
-      'tx': settings['transId'],
-      'p': 'B2C_1A_signup_signin',
-    }
-  )
-  print("[+] confirm_login: ",confirm_login)
-  print("[+] doing some BeautifulSoup ...")
-  soup = BeautifulSoup(confirm_login.content, 'html.parser')
-  form = soup.find('form', {'id': 'auto'})
-  s.post(
-    form['action'],
-    allow_redirects=False,
-    data={
-      'state': form.find('input', {'name': 'state'})['value'],
-      'client_info': form.find('input', {'name': 'client_info'})['value'],
-      'code': form.find('input', {'name': 'code'})['value'],
-    }, 
-  )
-  
-  #data = s.get('https://myaccount.esbnetworks.ie/datadub/GetHdfContent?mprn=' + mpnr + '&startDate=' + start_date.strftime('%Y-%m-%d'))
-  print("[+] getting CSV file for MPRN ...")
-  data = s.get('https://myaccount.esbnetworks.ie/DataHub/DownloadHdf?mprn=' + mpnr + '&startDate=' + start_date.strftime('%d-%m-%Y'))
-
-  print("[+] CSV file received !!!")
-  data_decoded = data.content.decode('utf-8').splitlines()
-  print("[+] data decoded from Binary format")
-  print("[+] Adding to InfluxDB (this will take a while)...")
-  json_data = parse_csv(data_decoded)
-  return json_data
-
-def parse_date(date_str):
-  if len(date_str) == 19:
-      return datetime.strptime(date_str, '%Y-%m-%d %H:%M')
-  else:
-      dt = datetime.strptime(date_str[:19], '%d-%m-%Y %H:%M')
-      return dt
-
-def load_smart_meter_stats_v2(user, password, mpnr):
-  #last_month = datetime.today() - timedelta(days=30)
-  today_ = datetime.today()
-  #smart_meter_data = load_esb_data(user, password, mpnr, last_month)
-  smart_meter_data = load_esb_data(user, password, mpnr, today_)
-  print("[+] smart_meter_data: ",smart_meter_data)
-  print("[++] end of smart_meter_data")
-  return smart_meter_data
-
-def parse_csv(csv_file):
-  my_json = []
-  csv_reader = csv.DictReader(csv_file)
-  for row in csv_reader:
-    mprn = row['MPRN']
-    value = row['Read Value']
-    the_date = parse_date(row['Read Date and End Time'])
-    update_influx(mprn, the_date, value)
-
-
-def update_influx(mpnr, the_date, value):
-  global influx_token, influx_url, influx_org, influx_bucket
-
-  # connect to the influx server...
-  write_client = influxdb_client.InfluxDBClient(url=influx_url, token=influx_token, org=influx_org, verify_ssl=0)
-  write_api = write_client.write_api(write_options=SYNCHRONOUS)
-  point = (
-    Point("power")
-    .tag("MPRN", mpnr)
-    .field("usage", float(value))
-    .time(the_date, write_precision="ms")
-  )
-  write_api.write(bucket=influx_bucket, org=influx_org, record=point)
+try:
+  if sys.argv[1] == 'debug':
+    debug = True
+except:
+   debug = False
 
 with open("config.yml") as config_file:
   config = yaml.load(config_file, Loader=yaml.FullLoader)
@@ -130,9 +20,112 @@ meter_mprn = config["esb"]["mprn"]
 esb_user_name = config["esb"]["user_name"]
 esb_password = config["esb"]["password"]
 
-influx_token = config["influx"]["token"]
-influx_url = config["influx"]["url"]
-influx_org = config["influx"]["org"]
-influx_bucket = config["influx"]["bucket"]
+main_url = "https://myaccount.esbnetworks.ie"
+historic_consumption_url = "https://myaccount.esbnetworks.ie/Api/HistoricConsumption"
+file_url = 'https://myaccount.esbnetworks.ie/DataHub/DownloadHdfPeriodic'
 
-xoxo = load_smart_meter_stats_v2(esb_user_name, esb_password, meter_mprn)
+if debug == True:
+  print("[+] open session ...")
+s = requests.Session()
+
+s.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+  })
+login_page = s.get(main_url, allow_redirects=True)
+if debug == True:
+  print("[!] Landing page Status Code: ", login_page.status_code)
+result = re.findall(r"(?<=var SETTINGS = )\S*;", str(login_page.content))
+settings = json.loads(result[0][:-1])
+if debug == True:
+  print("-"*10)
+  print("csrf token: ", settings['csrf'])
+  print("transid token: ", settings['transId'])
+  print("-"*10)
+
+s.post(
+    'https://login.esbnetworks.ie/esbntwkscustportalprdb2c01.onmicrosoft.com/B2C_1A_signup_signin/SelfAsserted?tx=' + settings['transId'] + '&p=B2C_1A_signup_signin',
+    data={
+      'signInName': esb_user_name, 
+      'password': esb_password, 
+      'request_type': 'RESPONSE'
+    },
+    headers={
+      'x-csrf-token': settings['csrf'],
+    },
+    allow_redirects=True)
+confirm_login = s.get(
+    'https://login.esbnetworks.ie/esbntwkscustportalprdb2c01.onmicrosoft.com/B2C_1A_signup_signin/api/CombinedSigninAndSignup/confirmed',
+    params={
+      'rememberMe': False,
+      'csrf_token': settings['csrf'],
+      'tx': settings['transId'],
+      'p': 'B2C_1A_signup_signin',
+    }
+  )
+soup = BeautifulSoup(confirm_login.content, 'html.parser')
+form = soup.find('form', {'id': 'auto'})
+if debug == True:
+  print("[!] Submitting login form ...")
+fff=s.post(
+        form['action'],
+        allow_redirects=True,
+        data={
+          'state': form.find('input', {'name': 'state'})['value'],
+          'client_info': form.find('input', {'name': 'client_info'})['value'],
+          'code': form.find('input', {'name': 'code'})['value'],
+        }, 
+    )
+if debug == True:
+  print("[!] Status Code: ", fff.status_code)
+user_welcome_soup = BeautifulSoup(fff.text,'html.parser')
+user_elements = user_welcome_soup.find('h1', class_='esb-title-h1')
+if user_elements.text[:2] != "We":
+    print("[!!!] No Welcome message, User is not logged in.")
+    s.close()
+h1_elem = s.get(historic_consumption_url, allow_redirects=True)
+h1_elem_content = h1_elem.text
+h1_elem_soup = BeautifulSoup(h1_elem_content, 'html.parser')
+h1_elem_element = h1_elem_soup.find('h1', class_='esb-title-h1')
+if h1_elem_element.text[:2] != "My":
+    print("[!] ups - something went wrong.")
+    s.close()
+x_headers={
+  'Host': 'myaccount.esbnetworks.ie',
+  'x-ReturnUrl': historic_consumption_url,
+  'Referer': historic_consumption_url,
+}
+x_down = s.get(main_url+"/af/t",headers=x_headers)
+set_cookie_header = x_down.headers.get('Set-Cookie', '')
+def extract_xsrf_token(cookie_header):
+    cookies = cookie_header.split(',')
+    for cookie in cookies:
+        if 'XSRF-TOKEN' in cookie:
+            token = cookie.split('XSRF-TOKEN=')[1].split(';')[0]
+            return token
+    return None
+xsrf_token = extract_xsrf_token(set_cookie_header)
+file_headers = {
+    'Referer': historic_consumption_url,
+    'content-type': 'application/json',
+    'x-returnurl': historic_consumption_url,
+    'x-xsrf-token': xsrf_token,
+    'Origin': main_url,
+}
+payload_data = {
+    "mprn": meter_mprn,
+    "searchType": "intervalkw"
+}
+response_data_file = s.post(file_url, headers=file_headers, json=payload_data)
+
+s.close()
+magic_data = response_data_file.content.decode("utf-8")
+
+my_json = []
+csv_reader = csv.DictReader(magic_data.split('\n'))
+
+for row in csv_reader:
+    my_json.append(row)
+
+json_out = json.dumps(my_json, indent=2)
+
+print(json_out)
