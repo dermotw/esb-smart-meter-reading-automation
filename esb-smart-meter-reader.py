@@ -1,4 +1,4 @@
-# #!/usr/bin/env python3
+#!/usr/bin/env python3
 import requests
 from bs4 import BeautifulSoup   # pip install beautifulsoup4
 import re as re
