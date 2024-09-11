@@ -62,7 +62,7 @@ def load_esb_data(user, password, mpnr, start_date):
   print("[+] doing some BeautifulSoup ...")
   soup = BeautifulSoup(confirm_login.content, 'html.parser')
   form = soup.find('form', {'id': 'auto'})
-  s.post(
+  data = s.post(
     form['action'],
     allow_redirects=False,
     data={
@@ -71,13 +71,19 @@ def load_esb_data(user, password, mpnr, start_date):
       'code': form.find('input', {'name': 'code'})['value'],
     }, 
   )
-  
+
   #data = s.get('https://myaccount.esbnetworks.ie/datadub/GetHdfContent?mprn=' + mpnr + '&startDate=' + start_date.strftime('%Y-%m-%d'))
   print("[+] getting CSV file for MPRN ...")
-  data = s.get('https://myaccount.esbnetworks.ie/DataHub/DownloadHdf?mprn=' + mpnr + '&startDate=' + start_date.strftime('%d-%m-%Y'))
+
+  payload = {'mprn': mpnr, 'searchType': 'intervalkw'}
+  print(payload)
+
+  data = s.post('https://myaccount.esbnetworks.ie/DataHub/DownloadHdfPeriodic', json=payload)
+  print(data)
 
   print("[+] CSV file received !!!")
   data_decoded = data.content.decode('utf-8').splitlines()
+  print(data_decoded)
   print("[+] data decoded from Binary format")
   print("[+] Adding to InfluxDB (this will take a while)...")
   json_data = parse_csv(data_decoded)
@@ -107,7 +113,6 @@ def parse_csv(csv_file):
     value = row['Read Value']
     the_date = parse_date(row['Read Date and End Time'])
     update_influx(mprn, the_date, value)
-
 
 def update_influx(mpnr, the_date, value):
   global influx_token, influx_url, influx_org, influx_bucket
