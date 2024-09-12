@@ -1,1 +1,4 @@
-esb-smart-meter-importer
+influxdb_client
+pyyaml
+bs4
+ujson

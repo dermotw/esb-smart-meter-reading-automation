@@ -2,10 +2,15 @@
 import requests
 from bs4 import BeautifulSoup   # pip install beautifulsoup4
 import re as re
-import json
+import json as json
 import csv
 import yaml
 import sys
+from datetime import datetime, timedelta, timezone
+
+import influxdb_client, os, time
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 try:
   if sys.argv[1] == 'debug':
@@ -13,12 +18,41 @@ try:
 except:
    debug = False
 
+def update_influx(mpnr, the_date, value):
+  global influx_token, influx_url, influx_org, influx_bucket, debug
+
+  if debug == True:
+    print(the_date, mpnr, value)
+
+  # connect to the influx server...
+  write_client = influxdb_client.InfluxDBClient(url=influx_url, token=influx_token, org=influx_org, verify_ssl=1)
+  write_api = write_client.write_api(write_options=SYNCHRONOUS)
+  point = (
+    Point("power")
+    .tag("MPRN", mpnr)
+    .field("usage", float(value))
+    .time(the_date, write_precision="ms")
+  )
+  write_api.write(bucket=influx_bucket, org=influx_org, record=point)
+
+def parse_date(date_str):
+  if len(date_str) == 19:
+      return datetime.strptime(date_str, '%Y-%m-%d %H:%M')
+  else:
+      dt = datetime.strptime(date_str[:19], '%d-%m-%Y %H:%M')
+      return dt
+
 with open("config.yml") as config_file:
   config = yaml.load(config_file, Loader=yaml.FullLoader)
 
 meter_mprn = config["esb"]["mprn"]
 esb_user_name = config["esb"]["user_name"]
 esb_password = config["esb"]["password"]
+
+influx_url = config["influx"]["url"]
+influx_token = config["influx"]["token"]
+influx_org = config["influx"]["org"]
+influx_bucket = config["influx"]["bucket"]
 
 main_url = "https://myaccount.esbnetworks.ie"
 historic_consumption_url = "https://myaccount.esbnetworks.ie/Api/HistoricConsumption"
@@ -123,9 +157,16 @@ magic_data = response_data_file.content.decode("utf-8")
 my_json = []
 csv_reader = csv.DictReader(magic_data.split('\n'))
 
+
 for row in csv_reader:
-    my_json.append(row)
+    mprn = row['MPRN']
+    the_date = parse_date(row['Read Date and End Time'])
+    value = row['Read Value']
 
-json_out = json.dumps(my_json, indent=2)
-
-print(json_out)
+    # don't update if the data is older than 1 week!
+    # 604800
+    if int(time.time())-604800 > int(the_date.timestamp()):
+       if debug == True:
+          print("Hit a datapoint that's more than a week old - quitting now!")
+       quit()
+    update_influx(mprn, the_date, value)
